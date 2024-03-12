@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.002.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CIDR-Search", "src\CIDR-Search.csproj", "{06F98AE2-31F5-4119-98CB-33B85A5E9352}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{06F98AE2-31F5-4119-98CB-33B85A5E9352}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{06F98AE2-31F5-4119-98CB-33B85A5E9352}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{06F98AE2-31F5-4119-98CB-33B85A5E9352}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{06F98AE2-31F5-4119-98CB-33B85A5E9352}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {728D6DFC-5B69-4828-A583-ABDA1E2CC197}
+	EndGlobalSection
+EndGlobal
