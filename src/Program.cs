@@ -59,22 +59,22 @@ class Program
         //     await Benchmark(ips, new HashSetSearcher(cidrs));
         // }
 
-        // Console.WriteLine($"Benchmarking Sqlite searcher...");
+        Console.WriteLine($"Benchmarking Sqlite searcher...");
 
-        // var sqlite = new SQLiteSearcher(cidrs);
-
-        // foreach (var x in Enumerable.Range(0, 1))
-        // {
-        //     await Benchmark(ips, sqlite);
-        // }
-
-        Console.WriteLine($"Benchmarking Sqlite Range searcher...");
-        var sqliteRange = new SQLiteRangeSearcher(cidrs);
+        var sqlite = new SQLiteSearcher(cidrs);
 
         foreach (var x in Enumerable.Range(0, 1))
         {
-            await Benchmark(ips, sqliteRange);
+            await Benchmark(ips, sqlite);
         }
+
+        // Console.WriteLine($"Benchmarking Sqlite Range searcher...");
+        // var sqliteRange = new SQLiteRangeSearcher(cidrs);
+
+        // foreach (var x in Enumerable.Range(0, 1))
+        // {
+        //     await Benchmark(ips, sqliteRange);
+        // }
     }
 
     static async Task<long> Benchmark(IEnumerable<IPAddress> ips, ISearcher searcher)
@@ -232,7 +232,7 @@ class SQLiteSearcher : ISearcher
         Console.WriteLine("Creating table...");
 
         using var create = Connection.CreateCommand();
-        create.CommandText = "CREATE TABLE cidrs (start INTEGER, end INTEGER)";
+        create.CommandText = "CREATE TABLE cidrs (start INTEGER, end INTEGER); CREATE INDEX idx_start ON cidrs (start); CREATE INDEX idx_end ON cidrs (end);";
         create.ExecuteNonQuery();
 
         var sw = new Stopwatch();
@@ -268,7 +268,7 @@ class SQLiteSearcher : ISearcher
             return false;
         }
 
-        Console.WriteLine(ip);
+        //Console.WriteLine(ip);
 
         return true;
     }
