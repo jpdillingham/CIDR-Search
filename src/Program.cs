@@ -46,11 +46,11 @@ class Program
 
         Console.WriteLine($"Benchmarking Brute force...");
 
-        var brute = new BruteForceSearcher(cidrs);
-        foreach (var x in Enumerable.Range(0, 5))
-        {
-            await Benchmark(ips, brute);
-        }
+        // var brute = new BruteForceSearcher(cidrs);
+        // foreach (var x in Enumerable.Range(0, 5))
+        // {
+        //     await Benchmark(ips, brute);
+        // }
 
         // Console.WriteLine($"Benchmarking HashSet searcher...");
 
@@ -59,13 +59,21 @@ class Program
         //     await Benchmark(ips, new HashSetSearcher(cidrs));
         // }
 
-        // Console.WriteLine($"Benchmarking Sqlite searcher...");
+        Console.WriteLine($"Benchmarking Sqlite searcher...");
 
         var sqlite = new SQLiteSearcher(cidrs);
 
         foreach (var x in Enumerable.Range(0, 5))
         {
             await Benchmark(ips, sqlite);
+        }
+
+        Console.WriteLine($"Benchmarking Sqlite Range searcher...");
+        var sqliteRange = new SQLiteRangeSearcher(cidrs);
+
+        foreach (var x in Enumerable.Range(0, 5))
+        {
+            await Benchmark(ips, sqliteRange);
         }
     }
 
@@ -237,6 +245,58 @@ class SQLiteSearcher : ISearcher
             Connection.ExecuteNonQuery("INSERT INTO cidrs (start, end) VALUES(@start, @end)", cmd => {
                 cmd.Parameters.AddWithValue("start", cidr.Begin.ToUint32());
                 cmd.Parameters.AddWithValue("end", cidr.End.ToUint32());
+            });
+        }
+
+        sw.Stop();
+        Console.WriteLine($"Table filled in {sw.ElapsedMilliseconds}ms");
+    }
+
+    private SqliteConnection Connection { get; }
+
+    public async Task<bool> ExistsAsync(IPAddress ip)
+    {
+        await Task.Yield();
+
+        using var cmd = new SqliteCommand("SELECT start, end FROM cidrs WHERE @ip BETWEEN start AND end LIMIT 1", Connection);
+        cmd.Parameters.AddWithValue("ip", ip.ToUint32());
+
+        var reader = cmd.ExecuteReader();
+
+        if (!reader.Read())
+        {
+            return false;
+        }
+
+        return true;
+    }
+}
+
+class SQLiteRangeSearcher : ISearcher
+{
+    // https://www.sqlite.org/rtree.html
+    public SQLiteRangeSearcher(List<IPAddressRange> cidrs)
+    {
+        Connection = new SqliteConnection("Data Source=:memory:");
+        Connection.Open();
+
+        Console.WriteLine("Creating table...");
+
+        using var create = Connection.CreateCommand();
+        create.CommandText = "CREATE VIRTUAL TABLE cidrs USING rtree(id, start INTEGER, end INTEGER)";
+        create.ExecuteNonQuery();
+
+        var sw = new Stopwatch();
+        sw.Start();
+
+        Console.WriteLine("Table created.  Filling...");
+
+        foreach (var record in cidrs.Select((value, idx) => new { idx, value }))
+        {
+            Connection.ExecuteNonQuery("INSERT INTO cidrs (id, start, end) VALUES(@id, @start, @end)", cmd => {
+                cmd.Parameters.AddWithValue("id", record.idx);
+                cmd.Parameters.AddWithValue("start", record.value.Begin.ToUint32());
+                cmd.Parameters.AddWithValue("end", record.value.End.ToUint32());
             });
         }
 
