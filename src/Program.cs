@@ -59,19 +59,19 @@ class Program
         //     await Benchmark(ips, new HashSetSearcher(cidrs));
         // }
 
-        Console.WriteLine($"Benchmarking Sqlite searcher...");
+        // Console.WriteLine($"Benchmarking Sqlite searcher...");
 
-        var sqlite = new SQLiteSearcher(cidrs);
+        // var sqlite = new SQLiteSearcher(cidrs);
 
-        foreach (var x in Enumerable.Range(0, 5))
-        {
-            await Benchmark(ips, sqlite);
-        }
+        // foreach (var x in Enumerable.Range(0, 1))
+        // {
+        //     await Benchmark(ips, sqlite);
+        // }
 
         Console.WriteLine($"Benchmarking Sqlite Range searcher...");
         var sqliteRange = new SQLiteRangeSearcher(cidrs);
 
-        foreach (var x in Enumerable.Range(0, 5))
+        foreach (var x in Enumerable.Range(0, 1))
         {
             await Benchmark(ips, sqliteRange);
         }
@@ -268,6 +268,8 @@ class SQLiteSearcher : ISearcher
             return false;
         }
 
+        Console.WriteLine(ip);
+
         return true;
     }
 }
@@ -283,7 +285,7 @@ class SQLiteRangeSearcher : ISearcher
         Console.WriteLine("Creating table...");
 
         using var create = Connection.CreateCommand();
-        create.CommandText = "CREATE VIRTUAL TABLE cidrs USING rtree(id, start INTEGER, end INTEGER)";
+        create.CommandText = "CREATE VIRTUAL TABLE cidrs USING rtree(id TEXT, start REAL, end REAL)";
         create.ExecuteNonQuery();
 
         var sw = new Stopwatch();
@@ -293,6 +295,13 @@ class SQLiteRangeSearcher : ISearcher
 
         foreach (var record in cidrs.Select((value, idx) => new { idx, value }))
         {
+            if (record.idx == 213120)
+            {
+                Console.WriteLine(record.value.ToString());
+                Console.WriteLine(record.value.ToCidrString());
+                Console.WriteLine($"first: {record.value.Begin}-{record.value.End}");
+                Console.WriteLine($"first: {record.value.Begin.ToUint32()}-{record.value.End.ToUint32()}");
+            }
             Connection.ExecuteNonQuery("INSERT INTO cidrs (id, start, end) VALUES(@id, @start, @end)", cmd => {
                 cmd.Parameters.AddWithValue("id", record.idx);
                 cmd.Parameters.AddWithValue("start", record.value.Begin.ToUint32());
@@ -310,7 +319,7 @@ class SQLiteRangeSearcher : ISearcher
     {
         await Task.Yield();
 
-        using var cmd = new SqliteCommand("SELECT start, end FROM cidrs WHERE @ip BETWEEN start AND end LIMIT 1", Connection);
+        using var cmd = new SqliteCommand("SELECT id, start, end FROM cidrs WHERE start <= @ip AND end >= @ip LIMIT 1", Connection);
         cmd.Parameters.AddWithValue("ip", ip.ToUint32());
 
         var reader = cmd.ExecuteReader();
@@ -319,6 +328,18 @@ class SQLiteRangeSearcher : ISearcher
         {
             return false;
         }
+
+        var id = reader.GetInt64(0);
+        var start = reader.GetInt64(1);
+        var end = reader.GetInt64(2);
+
+        if (ip.Equals(IPAddress.Parse("209.237.212.62")))
+        {
+            Console.WriteLine($"id {id}");
+            Console.WriteLine($"{ip} or {ip.ToUint32()} in {start}-{end}");
+            Console.WriteLine(ip);
+        }
+
 
         return true;
     }
