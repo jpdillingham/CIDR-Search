@@ -3,6 +3,7 @@ using System.IO;
 using NetTools;
 using Utility.CommandLine;
 using System.Diagnostics;
+using Microsoft.Data.Sqlite;
 
 class Program
 {
@@ -43,12 +44,13 @@ class Program
         var ips = (await File.ReadAllLinesAsync(IPFile)).Select(IPAddress.Parse);
         Console.WriteLine($"Found {ips.Count()} IPs to test");
 
-        // Console.WriteLine($"Benchmarking Brute force...");
+        Console.WriteLine($"Benchmarking Brute force...");
 
-        // foreach (var x in Enumerable.Range(0, 10))
-        // {
-        //     await Benchmark(ips, new BruteForceSearcher(cidrs));
-        // }
+        var brute = new BruteForceSearcher(cidrs);
+        foreach (var x in Enumerable.Range(0, 5))
+        {
+            await Benchmark(ips, brute);
+        }
 
         // Console.WriteLine($"Benchmarking HashSet searcher...");
 
@@ -56,6 +58,15 @@ class Program
         // {
         //     await Benchmark(ips, new HashSetSearcher(cidrs));
         // }
+
+        // Console.WriteLine($"Benchmarking Sqlite searcher...");
+
+        var sqlite = new SQLiteSearcher(cidrs);
+
+        foreach (var x in Enumerable.Range(0, 5))
+        {
+            await Benchmark(ips, sqlite);
+        }
     }
 
     static async Task<long> Benchmark(IEnumerable<IPAddress> ips, ISearcher searcher)
@@ -63,7 +74,7 @@ class Program
         var sw = new Stopwatch();
         sw.Start();
 
-        int matches = 1;
+        int matches = 0;
 
         foreach (var ip in ips)
         {
@@ -77,7 +88,16 @@ class Program
         sw.Stop();
 
         var elapsed = sw.ElapsedMilliseconds;
-        Console.WriteLine($"Matched {matches} IPs in {elapsed}ms, {elapsed / matches}ms per match, {matches / (elapsed / 1000D)} matches/second");
+
+        if (matches > 0) 
+        {
+            Console.WriteLine($"Matched {matches} IPs in {elapsed}ms, {elapsed / matches}ms per match, {matches / (elapsed / 1000D)} matches/second");
+        }
+        else
+        {
+            Console.WriteLine("No matches");
+        }
+
         return sw.ElapsedMilliseconds;
     }
 }
@@ -109,6 +129,12 @@ static class Shared
 
         nextAsUint = BitConverter.ToUInt32(nextAsBytes, 0);
         return new IPAddress(nextAsUint);
+    }
+    public static int ExecuteNonQuery(this SqliteConnection conn, string query, Action<SqliteCommand> action = null)
+    {
+        using var cmd = new SqliteCommand(query, conn);
+        action?.Invoke(cmd);
+        return cmd.ExecuteNonQuery();
     }
 }
 
@@ -192,12 +218,48 @@ class SQLiteSearcher : ISearcher
 {
     public SQLiteSearcher(List<IPAddressRange> cidrs)
     {
+        Connection = new SqliteConnection("Data Source=:memory:");
+        Connection.Open();
 
+        Console.WriteLine("Creating table...");
+
+        using var create = Connection.CreateCommand();
+        create.CommandText = "CREATE TABLE cidrs (start INTEGER, end INTEGER)";
+        create.ExecuteNonQuery();
+
+        var sw = new Stopwatch();
+        sw.Start();
+
+        Console.WriteLine("Table created.  Filling...");
+
+        foreach (var cidr in cidrs)
+        {
+            Connection.ExecuteNonQuery("INSERT INTO cidrs (start, end) VALUES(@start, @end)", cmd => {
+                cmd.Parameters.AddWithValue("start", cidr.Begin.ToUint32());
+                cmd.Parameters.AddWithValue("end", cidr.End.ToUint32());
+            });
+        }
+
+        sw.Stop();
+        Console.WriteLine($"Table filled in {sw.ElapsedMilliseconds}ms");
     }
+
+    private SqliteConnection Connection { get; }
 
     public async Task<bool> ExistsAsync(IPAddress ip)
     {
         await Task.Yield();
-        return false;
+
+        using var cmd = new SqliteCommand("SELECT start, end FROM cidrs WHERE @ip BETWEEN start AND end LIMIT 1", Connection);
+        cmd.Parameters.AddWithValue("ip", ip.ToUint32());
+
+        var reader = cmd.ExecuteReader();
+
+        if (!reader.Read())
+        {
+            return false;
+        }
+
+        return true;
     }
 }
