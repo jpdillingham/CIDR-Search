@@ -4,6 +4,7 @@ using NetTools;
 using Utility.CommandLine;
 using System.Diagnostics;
 using Microsoft.Data.Sqlite;
+using System.Text.Json;
 
 class Program
 {
@@ -40,17 +41,19 @@ class Program
         }
 
         Console.WriteLine($"Found {cidrs.Count()} CIDRs");
+        cidrs = cidrs.Distinct().ToList();
+        Console.WriteLine($"Deduped to {cidrs.Count()} CIDRs");
 
         var ips = (await File.ReadAllLinesAsync(IPFile)).Select(IPAddress.Parse);
         Console.WriteLine($"Found {ips.Count()} IPs to test");
 
         Console.WriteLine($"Benchmarking Brute force...");
 
-        // var brute = new BruteForceSearcher(cidrs);
-        // foreach (var x in Enumerable.Range(0, 5))
-        // {
-        //     await Benchmark(ips, brute);
-        // }
+        var brute = new BruteForceSearcher(cidrs);
+        foreach (var x in Enumerable.Range(0, 1))
+        {
+            await Benchmark(ips, brute);
+        }
 
         // Console.WriteLine($"Benchmarking HashSet searcher...");
 
@@ -59,14 +62,14 @@ class Program
         //     await Benchmark(ips, new HashSetSearcher(cidrs));
         // }
 
-        Console.WriteLine($"Benchmarking Sqlite searcher...");
+        // Console.WriteLine($"Benchmarking Sqlite searcher...");
 
-        var sqlite = new SQLiteSearcher(cidrs);
+        // var sqlite = new SQLiteSearcher(cidrs);
 
-        foreach (var x in Enumerable.Range(0, 1))
-        {
-            await Benchmark(ips, sqlite);
-        }
+        // foreach (var x in Enumerable.Range(0, 1))
+        // {
+        //     await Benchmark(ips, sqlite);
+        // }
 
         // Console.WriteLine($"Benchmarking Sqlite Range searcher...");
         // var sqliteRange = new SQLiteRangeSearcher(cidrs);
@@ -88,7 +91,7 @@ class Program
         {
             if (await searcher.ExistsAsync(ip))
             {
-                // Console.WriteLine($"IP {ip} matched a CIDR!");
+                Console.WriteLine(ip);
                 matches++;
             }            
         }
@@ -156,21 +159,46 @@ class BruteForceSearcher : ISearcher
     public BruteForceSearcher(List<IPAddressRange> cidrs)
     {
         CIDRs = cidrs;
+        CIDRdict = cidrs.GroupBy(cidr => cidr.ToString().Split('.')[0]).ToDictionary(k => Int32.Parse(k.Key), k => k.ToList());
+
+        File.WriteAllText("foo.txt", JsonSerializer.Serialize(CIDRdict));
+        Console.WriteLine(string.Join(", ", CIDRdict.Keys));
     }
 
     private List<IPAddressRange> CIDRs { get; }
+    private Dictionary<int, List<IPAddressRange>> CIDRdict { get; } = new Dictionary<int, List<IPAddressRange>>();
 
-    public Task<bool> ExistsAsync(IPAddress ip)
+
+    public async Task<bool> ExistsAsync(IPAddress ip)
     {
+        await Task.Yield();
+
         foreach (var cidr in CIDRs)
         {
             if (cidr.Contains(ip))
             {
-                return Task.FromResult(true);
+                Console.WriteLine($"{ip} is in {cidr.ToCidrString()}");
+                return true;
+                
             }
+
         }
 
-        return Task.FromResult(false);
+        return false;
+
+        // var first = Int32.Parse(ip.ToString().Split('.')[0]);
+
+        // if (!CIDRdict.ContainsKey(first)) return false;
+
+        // foreach (var cidr in CIDRdict[first])
+        // {
+        //     if (cidr.Contains(ip))
+        //     {
+        //         return true;
+        //     }
+        // }
+
+        // return false;
     }
 }
 
@@ -268,8 +296,6 @@ class SQLiteSearcher : ISearcher
             return false;
         }
 
-        //Console.WriteLine(ip);
-
         return true;
     }
 }
@@ -285,7 +311,7 @@ class SQLiteRangeSearcher : ISearcher
         Console.WriteLine("Creating table...");
 
         using var create = Connection.CreateCommand();
-        create.CommandText = "CREATE VIRTUAL TABLE cidrs USING rtree(id TEXT, start REAL, end REAL)";
+        create.CommandText = "CREATE VIRTUAL TABLE cidr_lookup USING rtree(idx, start, end); CREATE TABLE cidrs (idx, cidr);";
         create.ExecuteNonQuery();
 
         var sw = new Stopwatch();
@@ -295,18 +321,24 @@ class SQLiteRangeSearcher : ISearcher
 
         foreach (var record in cidrs.Select((value, idx) => new { idx, value }))
         {
-            if (record.idx == 213120)
-            {
-                Console.WriteLine(record.value.ToString());
-                Console.WriteLine(record.value.ToCidrString());
-                Console.WriteLine($"first: {record.value.Begin}-{record.value.End}");
-                Console.WriteLine($"first: {record.value.Begin.ToUint32()}-{record.value.End.ToUint32()}");
-            }
-            Connection.ExecuteNonQuery("INSERT INTO cidrs (id, start, end) VALUES(@id, @start, @end)", cmd => {
-                cmd.Parameters.AddWithValue("id", record.idx);
+            // if (record.idx == 213120)
+            // {
+            //     Console.WriteLine(record.value.ToString());
+            //     Console.WriteLine(record.value.ToCidrString());
+            //     Console.WriteLine($"first: {record.value.Begin}-{record.value.End}");
+            //     Console.WriteLine($"first: {record.value.Begin.ToUint32()}-{record.value.End.ToUint32()}");
+            // }
+            //Console.WriteLine($"INSERT: id:{record.value.ToCidrString()} start:{record.value.Begin.ToUint32()} end:{record.value.End.ToUint32()}");
+            Connection.ExecuteNonQuery(
+            @"
+                INSERT INTO cidr_lookup (idx, start, end) VALUES(@idx, @start, @end);
+                INSERT INTO cidrs (idx, cidr) VALUES(@idx, @cidr);
+            ", cmd => {
+                cmd.Parameters.AddWithValue("idx", record.idx);
+                cmd.Parameters.AddWithValue("cidr", record.value.ToCidrString());
                 cmd.Parameters.AddWithValue("start", record.value.Begin.ToUint32());
                 cmd.Parameters.AddWithValue("end", record.value.End.ToUint32());
-            });
+            });            
         }
 
         sw.Stop();
@@ -319,7 +351,7 @@ class SQLiteRangeSearcher : ISearcher
     {
         await Task.Yield();
 
-        using var cmd = new SqliteCommand("SELECT id, start, end FROM cidrs WHERE start <= @ip AND end >= @ip LIMIT 1", Connection);
+        using var cmd = new SqliteCommand("SELECT idx, start, end FROM cidr_lookup WHERE start <= @ip AND end >= @ip LIMIT 1", Connection);
         cmd.Parameters.AddWithValue("ip", ip.ToUint32());
 
         var reader = cmd.ExecuteReader();
@@ -329,17 +361,30 @@ class SQLiteRangeSearcher : ISearcher
             return false;
         }
 
-        var id = reader.GetInt64(0);
+        var idx = reader.GetInt64(0);
         var start = reader.GetInt64(1);
         var end = reader.GetInt64(2);
 
-        if (ip.Equals(IPAddress.Parse("209.237.212.62")))
-        {
-            Console.WriteLine($"id {id}");
-            Console.WriteLine($"{ip} or {ip.ToUint32()} in {start}-{end}");
-            Console.WriteLine(ip);
-        }
+        // // produces false positive.  rounding error?
+        // if (ip.Equals(IPAddress.Parse("209.237.212.62")))
+        // {
+        //     Console.WriteLine($"id {id}");
+        //     Console.WriteLine($"{ip} or {ip.ToUint32()} in {start}-{end}");
+        //     Console.WriteLine(ip);
+        // }
 
+        using var cmd2 = new SqliteCommand("SELECT cidr FROM cidrs WHERE idx = @idx", Connection);
+        cmd2.Parameters.AddWithValue("idx", idx);
+
+        reader = cmd2.ExecuteReader();
+        reader.Read();
+
+        var cidr = reader.GetString(0);
+
+        var range = IPAddressRange.Parse(cidr);
+        var pass = range.Contains(ip) ? "PASS" : "FAIL";
+
+        Console.WriteLine($"[{pass}] {ip} - {range.ToCidrString()}");
 
         return true;
     }
