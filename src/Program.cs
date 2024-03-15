@@ -5,6 +5,7 @@ using Utility.CommandLine;
 using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 class Program
 {
@@ -91,7 +92,7 @@ class Program
         {
             if (await searcher.ExistsAsync(ip))
             {
-                Console.WriteLine(ip);
+                //Console.WriteLine(ip);
                 matches++;
             }            
         }
@@ -158,47 +159,72 @@ class BruteForceSearcher : ISearcher
 {
     public BruteForceSearcher(List<IPAddressRange> cidrs)
     {
-        CIDRs = cidrs;
-        CIDRdict = cidrs.GroupBy(cidr => cidr.ToString().Split('.')[0]).ToDictionary(k => Int32.Parse(k.Key), k => k.ToList());
+        var sw = new Stopwatch();
+        sw.Start();
 
-        File.WriteAllText("foo.txt", JsonSerializer.Serialize(CIDRdict));
-        Console.WriteLine(string.Join(", ", CIDRdict.Keys));
+        CIDRs = cidrs;
+
+        foreach (var cidr in cidrs)
+        {
+            var first = int.Parse(cidr.Begin.ToString().Split('.')[0]);
+            var last = int.Parse(cidr.End.ToString().Split('.')[0]);
+
+            var entry = (cidr.Begin.ToUint32(), cidr.End.ToUint32());
+
+            // CIDRs with a mask of /7 and lower span multiple octets, so we must add these CIDRs to the list for each octet
+            for (int i = 0; i <= last - first; i++)
+            {
+                CIDRdict.AddOrUpdate(
+                    key: first + i,
+                    addValueFactory: (_) => new List<(uint, uint)> { entry },
+                    updateValueFactory: (_, list) =>
+                    {
+                        list.Add(entry);
+                        return list;
+                    }
+                );
+            }
+        }
+
+        sw.Stop();
+        Console.WriteLine($"Populated dictionary in {sw.ElapsedMilliseconds}ms");
     }
 
     private List<IPAddressRange> CIDRs { get; }
-    private Dictionary<int, List<IPAddressRange>> CIDRdict { get; } = new Dictionary<int, List<IPAddressRange>>();
+    private ConcurrentDictionary<int, List<(uint, uint)>> CIDRdict { get; } = new ConcurrentDictionary<int, List<(uint, uint)>>();
 
 
     public async Task<bool> ExistsAsync(IPAddress ip)
     {
         await Task.Yield();
 
-        foreach (var cidr in CIDRs)
-        {
-            if (cidr.Contains(ip))
-            {
-                Console.WriteLine($"{ip} is in {cidr.ToCidrString()}");
-                return true;
-                
-            }
-
-        }
-
-        return false;
-
-        // var first = Int32.Parse(ip.ToString().Split('.')[0]);
-
-        // if (!CIDRdict.ContainsKey(first)) return false;
-
-        // foreach (var cidr in CIDRdict[first])
+        // foreach (var cidr in CIDRs)
         // {
         //     if (cidr.Contains(ip))
         //     {
-        //         return true;
+        //         //Console.WriteLine($"{ip} is in {cidr.ToCidrString()}");
+        //         return true;                
         //     }
+
         // }
 
         // return false;
+
+        var first = int.Parse(ip.ToString().Split('.')[0]);
+
+        if (!CIDRdict.TryGetValue(first, out List<(uint, uint)>? value)) return false;
+
+        var ipAsUint32 = ip.ToUint32();
+
+        foreach (var cidr in value)
+        {
+            if (ipAsUint32 >= cidr.Item1 && ipAsUint32 <= cidr.Item2)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 
