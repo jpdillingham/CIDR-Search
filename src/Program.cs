@@ -162,8 +162,6 @@ class BruteForceSearcher : ISearcher
         var sw = new Stopwatch();
         sw.Start();
 
-        CIDRs = cidrs;
-
         foreach (var cidr in cidrs)
         {
             var first = int.Parse(cidr.Begin.ToString().Split('.')[0]);
@@ -174,7 +172,7 @@ class BruteForceSearcher : ISearcher
             // CIDRs with a mask of /7 and lower span multiple octets, so we must add these CIDRs to the list for each octet
             for (int i = 0; i <= last - first; i++)
             {
-                CIDRdict.AddOrUpdate(
+                CIDRs.AddOrUpdate(
                     key: first + i,
                     addValueFactory: (_) => new List<(uint, uint)> { entry },
                     updateValueFactory: (_, list) =>
@@ -190,29 +188,16 @@ class BruteForceSearcher : ISearcher
         Console.WriteLine($"Populated dictionary in {sw.ElapsedMilliseconds}ms");
     }
 
-    private List<IPAddressRange> CIDRs { get; }
-    private ConcurrentDictionary<int, List<(uint, uint)>> CIDRdict { get; } = new ConcurrentDictionary<int, List<(uint, uint)>>();
+    private ConcurrentDictionary<int, List<(uint, uint)>> CIDRs { get; } = new ConcurrentDictionary<int, List<(uint, uint)>>();
 
 
     public async Task<bool> ExistsAsync(IPAddress ip)
     {
         await Task.Yield();
 
-        // foreach (var cidr in CIDRs)
-        // {
-        //     if (cidr.Contains(ip))
-        //     {
-        //         //Console.WriteLine($"{ip} is in {cidr.ToCidrString()}");
-        //         return true;                
-        //     }
-
-        // }
-
-        // return false;
-
         var first = int.Parse(ip.ToString().Split('.')[0]);
 
-        if (!CIDRdict.TryGetValue(first, out List<(uint, uint)>? value)) return false;
+        if (!CIDRs.TryGetValue(first, out List<(uint, uint)>? value)) return false;
 
         var ipAsUint32 = ip.ToUint32();
 
