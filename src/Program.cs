@@ -6,6 +6,7 @@ using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using System.Text.Json.Serialization;
 
 class Program
 {
@@ -51,7 +52,7 @@ class Program
         Console.WriteLine($"Benchmarking Brute force...");
 
         var brute = new BruteForceSearcher(cidrs);
-        foreach (var x in Enumerable.Range(0, 1))
+        foreach (var x in Enumerable.Range(0, 5))
         {
             await Benchmark(ips, brute);
         }
@@ -84,16 +85,31 @@ class Program
     static async Task<long> Benchmark(IEnumerable<IPAddress> ips, ISearcher searcher)
     {
         var sw = new Stopwatch();
+        var sw2 = new Stopwatch();
         sw.Start();
 
         int matches = 0;
+        ConcurrentDictionary<int, int> counts = new ConcurrentDictionary<int, int>();
+        List<(int, long)> timings = new List<(int, long)>();
 
         foreach (var ip in ips)
         {
-            if (await searcher.ExistsAsync(ip))
+            sw2.Restart();
+            var exists = searcher.Exists(ip);
+            sw2.Stop();
+
+            if (exists)
             {
+                var first = Convert.ToInt32(ip.GetAddressBytes()[0]);
                 //Console.WriteLine(ip);
                 matches++;
+
+                if (matches == 1) continue; // throw out the first result
+                timings.Add((first, sw2.ElapsedNanoSeconds()));
+                //counts.AddOrUpdate(key: first, addValueFactory: (_) => 1, updateValueFactory: (_, count) =>
+                //{
+                //    return count + 1;
+                //});
             }            
         }
 
@@ -110,12 +126,29 @@ class Program
             Console.WriteLine("No matches");
         }
 
+        Console.WriteLine(JsonSerializer.Serialize(counts));
+
+        Console.WriteLine($"Average ns: {timings.Select(t => t.Item2).Average()}");
+        Console.WriteLine($"Min ns: {timings.MinBy(t => t.Item2)}");
+        Console.WriteLine($"Max ns: {timings.MaxBy(t => t.Item2)}");
+
+        var sorted = timings.OrderByDescending(t => t.Item2).Select(t => new { Octet = t.Item1, Time = t.Item2 }).Take(10);
+        foreach (var timing in sorted)
+        {
+            Console.WriteLine(JsonSerializer.Serialize(timing));
+        }
+
         return sw.ElapsedMilliseconds;
     }
 }
 
 static class Shared 
 {
+    public static long ElapsedNanoSeconds(this Stopwatch watch)
+    {
+        return watch.ElapsedTicks * 1000000000 / Stopwatch.Frequency;
+    }
+
     public static uint ToUint32(this IPAddress ip)
     {
         byte[] bytes = ip.GetAddressBytes();
@@ -128,20 +161,6 @@ static class Shared
         return BitConverter.ToUInt32(bytes, 0);
     }
 
-    public static IPAddress NextIP(this IPAddress ip, int count)
-    {
-        var ipAsUint = ip.ToUint32();
-        var nextAsUint = ipAsUint + count;
-        var nextAsBytes = BitConverter.GetBytes(nextAsUint);
-
-        if (BitConverter.IsLittleEndian)
-        {
-            Array.Reverse(nextAsBytes);
-        }
-
-        nextAsUint = BitConverter.ToUInt32(nextAsBytes, 0);
-        return new IPAddress(nextAsUint);
-    }
     public static int ExecuteNonQuery(this SqliteConnection conn, string query, Action<SqliteCommand> action = null)
     {
         using var cmd = new SqliteCommand(query, conn);
@@ -152,7 +171,7 @@ static class Shared
 
 interface ISearcher
 {
-    Task<bool> ExistsAsync(IPAddress ip);
+    bool Exists(IPAddress ip);
 }
 
 class BruteForceSearcher : ISearcher
@@ -164,8 +183,8 @@ class BruteForceSearcher : ISearcher
 
         foreach (var cidr in cidrs)
         {
-            var first = int.Parse(cidr.Begin.ToString().Split('.')[0]);
-            var last = int.Parse(cidr.End.ToString().Split('.')[0]);
+            var first = cidr.Begin.GetAddressBytes()[0];
+            var last = cidr.End.GetAddressBytes()[0];
 
             var entry = (cidr.Begin.ToUint32(), cidr.End.ToUint32());
 
@@ -186,16 +205,14 @@ class BruteForceSearcher : ISearcher
 
         sw.Stop();
         Console.WriteLine($"Populated dictionary in {sw.ElapsedMilliseconds}ms");
+        Console.WriteLine(JsonSerializer.Serialize(CIDRs.Select(kvp => KeyValuePair.Create(kvp.Key, value: kvp.Value.Count))));
     }
 
     private ConcurrentDictionary<int, List<(uint, uint)>> CIDRs { get; } = new ConcurrentDictionary<int, List<(uint, uint)>>();
 
-
-    public async Task<bool> ExistsAsync(IPAddress ip)
+    public bool Exists(IPAddress ip)
     {
-        await Task.Yield();
-
-        var first = int.Parse(ip.ToString().Split('.')[0]);
+        int first = ip.GetAddressBytes()[0];
 
         if (!CIDRs.TryGetValue(first, out List<(uint, uint)>? value)) return false;
 
@@ -213,53 +230,6 @@ class BruteForceSearcher : ISearcher
     }
 }
 
-
-class HashSetSearcher : ISearcher
-{
-    public HashSetSearcher(List<IPAddressRange> cidrs)
-    {
-        var sw = new Stopwatch();
-        sw.Start();
-
-        foreach (var cidr in cidrs)
-        {
-            Console.WriteLine($"Range {cidr}");
-
-            var first = cidr.Begin.ToUint32();
-            var last = cidr.End.ToUint32();
-
-            for (uint i = 0; i <= last - first; i++)
-            {
-                var next = first + i;
-
-                var rev = BitConverter.GetBytes(next);
-
-                if (BitConverter.IsLittleEndian)
-                {
-                    Array.Reverse(rev);
-                }
-
-                var ok = BitConverter.ToUInt32(rev, 0);
-
-                //Console.WriteLine(new IPAddress(ok));
-                HashSet.Add(next);
-            }
-
-            //break;
-        }
-
-        sw.Stop();
-        Console.WriteLine($"Initialized HashSet with {HashSet.Count} records in {sw.ElapsedMilliseconds}ms");
-    }
-
-    private HashSet<uint> HashSet { get; } = new HashSet<uint>();
-
-    public async Task<bool> ExistsAsync(IPAddress ip)
-    {
-        await Task.Yield();
-        return false;
-    }
-}
 
 class SQLiteSearcher : ISearcher
 {
@@ -293,10 +263,8 @@ class SQLiteSearcher : ISearcher
 
     private SqliteConnection Connection { get; }
 
-    public async Task<bool> ExistsAsync(IPAddress ip)
+    public bool Exists(IPAddress ip)
     {
-        await Task.Yield();
-
         using var cmd = new SqliteCommand("SELECT start, end FROM cidrs WHERE @ip BETWEEN start AND end LIMIT 1", Connection);
         cmd.Parameters.AddWithValue("ip", ip.ToUint32());
 
@@ -358,10 +326,8 @@ class SQLiteRangeSearcher : ISearcher
 
     private SqliteConnection Connection { get; }
 
-    public async Task<bool> ExistsAsync(IPAddress ip)
+    public bool Exists(IPAddress ip)
     {
-        await Task.Yield();
-
         using var cmd = new SqliteCommand("SELECT idx, start, end FROM cidr_lookup WHERE start <= @ip AND end >= @ip LIMIT 1", Connection);
         cmd.Parameters.AddWithValue("ip", ip.ToUint32());
 
