@@ -230,6 +230,52 @@ class BruteForceSearcher : ISearcher
     }
 }
 
+class HashSetSearcher : ISearcher
+{
+    public HashSetSearcher(List<IPAddressRange> cidrs)
+    {
+        var sw = new Stopwatch();
+        sw.Start();
+
+        foreach (var cidr in cidrs)
+        {
+            Console.WriteLine($"Range {cidr}");
+
+            var first = cidr.Begin.ToUint32();
+            var last = cidr.End.ToUint32();
+
+            for (uint i = 0; i <= last - first; i++)
+            {
+                var next = first + i;
+
+                var rev = BitConverter.GetBytes(next);
+
+                if (BitConverter.IsLittleEndian)
+                {
+                    Array.Reverse(rev);
+                }
+
+                var ok = BitConverter.ToUInt32(rev, 0);
+
+                //Console.WriteLine(new IPAddress(ok));
+                HashSet.Add(next);
+            }
+
+            //break;
+        }
+
+        sw.Stop();
+        Console.WriteLine($"Initialized HashSet with {HashSet.Count} records in {sw.ElapsedMilliseconds}ms");
+    }
+
+    private HashSet<uint> HashSet { get; } = new HashSet<uint>();
+
+    public bool Exists(IPAddress ip)
+    {
+        return false;
+    }
+}
+
 
 class SQLiteSearcher : ISearcher
 {
