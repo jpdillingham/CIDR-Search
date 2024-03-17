@@ -80,6 +80,17 @@ Min ns: (33, 240)
 Max ns: (194, 202496)
 ```
 
+### More optimization!
+
+Switching from `List<T>` to an array nearly doubled the speed.  Here are the benchmarks for the Raspberry Pi 2:
+
+```
+Matched 16769 IPs in 5896ms, 0ms per match, 2844.1316146540025 matches/second
+Average ns: 16408.746839217558
+Min ns: (34, 1614)
+Max ns: (25, 2850928)
+```
+
 ## Other Approaches
 
 ### Brute force
