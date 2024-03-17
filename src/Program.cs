@@ -205,16 +205,21 @@ class BruteForceSearcher : ISearcher
 
         sw.Stop();
         Console.WriteLine($"Populated dictionary in {sw.ElapsedMilliseconds}ms");
-        Console.WriteLine(JsonSerializer.Serialize(CIDRs.Select(kvp => KeyValuePair.Create(kvp.Key, value: kvp.Value.Count))));
+        
+        foreach (var key in CIDRs.Keys)
+        {
+            FasterCIDRs.Add(key, CIDRs[key].ToArray());
+        }
     }
 
     private ConcurrentDictionary<int, List<(uint, uint)>> CIDRs { get; } = new ConcurrentDictionary<int, List<(uint, uint)>>();
+    private Dictionary<int, (uint, uint)[]> FasterCIDRs { get; } = new Dictionary<int, (uint, uint)[]>();
 
     public bool Exists(IPAddress ip)
     {
         int first = ip.GetAddressBytes()[0];
 
-        if (!CIDRs.TryGetValue(first, out List<(uint, uint)>? value)) return false;
+        if (!FasterCIDRs.TryGetValue(first, out (uint, uint)[]? value)) return false;
 
         var ipAsUint32 = ip.ToUint32();
 
