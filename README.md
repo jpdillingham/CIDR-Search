@@ -39,6 +39,47 @@ The memory footprint of the dictionary is roughly 30mb, which is (subjectively) 
 
 All benchmarks were produced on an Intel i5-3570 @ 3.40ghz (stock) with 24gb RAM and an SSD.
 
+### Additional benchmarks
+
+Raspberry Pi 2:
+
+```
+Matched 16769 IPs in 10043ms, 0ms per match, 1669.720203126556 matches/second
+Average ns: 27107.034947519085
+Min ns: (21, 1770)
+Max ns: (195, 3193442)
+```
+
+Raspberry Pi 3/armv7 (32 bit OS):
+
+```
+Matched 16769 IPs in 6668ms, 0ms per match, 2514.8470305938813 matches/second
+Average ns: 18295.95079914122
+Min ns: (11, 1458)
+Max ns: (7, 1325767)
+
+```
+
+Raspberry Pi 3/arm64 (64 bit OS):
+
+Quite interesting that the 64 bit is nearly twice as slow!
+
+```
+Matched 16769 IPs in 11555ms, 0ms per match, 1451.2332323669407 matches/second
+Average ns: 30772.02331822519
+Min ns: (29, 677)
+Max ns: (7, 1580938)
+```
+
+Raspberry Pi 4:
+
+```
+Matched 16769 IPs in 1696ms, 0ms per match, 9887.382075471698 matches/second
+Average ns: 4758.110567748092
+Min ns: (33, 240)
+Max ns: (194, 202496)
+```
+
 ## Other Approaches
 
 ### Brute force
